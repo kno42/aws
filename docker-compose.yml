@@ -1,0 +1,105 @@
+version: "3.7"
+ 
+services:
+  dwh_db_prod:
+    container_name: dwh_db_prod
+    image: ambicaaas/aas_dwh_storage_db
+    restart: always
+    ports:
+      - 6232:5432
+    volumes:
+      - dwh_db_prod_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=ambica_prod
+      - POSTGRES_DB=dwh
+    logging:
+        driver: "fluentd"
+  dwh_db_test:
+    container_name: dwh_db_test
+    image: ambicaaas/aas_dwh_storage_db
+    restart: always
+    ports:
+      - 6233:5432
+    volumes:
+      - dwh_db_test_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=ambica_test
+      - POSTGRES_DB=dwh
+    logging:
+        driver: "fluentd"
+  dwh_db_dev:
+    container_name: dwh_db_dev
+    image: ambicaaas/aas_dwh_storage_db
+    restart: always
+    ports:
+      - 6234:5432
+    volumes:
+      - dwh_db_dev_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=ambica_dev
+      - POSTGRES_DB=dwh
+    logging:
+        driver: "fluentd"
+  identity_db:
+    container_name: identity_db
+    image: ambicaaas/aas_dwh_storage_db
+    restart: always
+    ports:
+      - 6242:5432
+    environment: 
+      - POSTGRES_PASSWORD=ambica_sec
+      - POSTGRES_DB=security
+    volumes:
+      - identity_data:/var/lib/postgresql/data
+    logging:
+        driver: "fluentd"
+  identity_api:
+    depends_on:
+      - identity_db
+    container_name: identity_api
+    image: ambicaaas/aas_identity_server_api
+    restart: always
+    ports:
+      - 6241:80
+    logging:
+        driver: "fluentd"
+  datawarehouse_db:
+    container_name: datawarehouse_db
+    image: ambicaaas/aas_dwh_storage_db
+    restart: always
+    ports:
+      - 6271:5432
+    environment: 
+      - POSTGRES_PASSWORD=ambica_dwh
+      - POSTGRES_DB=datawarehouse
+    volumes:
+      - datawarehouse_data:/var/lib/postgresql/data
+    logging:
+        driver: "fluentd"
+  datawarehouse_api:
+    depends_on:
+      - datawarehouse_db
+    container_name: datawarehouse_api
+    image: ambicaaas/aas_datawarehouse_api
+    restart: always
+    ports:
+      - 6272:80
+    logging:
+        driver: "fluentd"
+  main_fe:
+    depends_on:
+      - datawarehouse_api
+    container_name: main_fe
+    image: ambicaaas/aas_main_fe
+    restart: always
+    ports:
+      - 6262:80
+    logging:
+        driver: "fluentd"
+
+volumes: 
+  dwh_db_prod_data:
+  dwh_db_test_data:
+  dwh_db_dev_data:
+  identity_data:
+  datawarehouse_data:
