@@ -181,12 +181,12 @@ services:
       - AAS_R_BASE_IMAGE_NAME=aas-r-base
       - R_BASE_IMAGE_NAME=r-base
       - PSQL_IMAGE_NAME=aas-psql
-    logging:
-        driver: "fluentd"
 # Tady /tmp/scripts nahraď cestou k nějaké tvojí reálné složce
       - SCRIPT_FOLDER=/tmp/scripts
     networks:
       - aas
+    logging:
+        driver: "fluentd"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 # Tady /tmp/scripts nahraď cestou k nějaké tvojí reálné složce
