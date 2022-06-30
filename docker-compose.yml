@@ -1,9 +1,35 @@
-version: "3.7"
+# Prvně je potřeba dát "docker login docker.io" údaje jsou dockerhubové
+# docker-compose -p "aas" -f docker-compose.yml up -d
+# Potom co se všechno stáhne a spustí, tak je potřeba minutu počkat (Dobrý je kouknou na aas-r-engine logy dokud se neukážou)
+
+
+# Založit usera POST http://localhost:6241/api/user (Nutnost založit tohle jméno. Zatím je to na tvrdo v kódu)
+#	{
+#	  "name":"adam.holan"
+#	}
+
+
+# Založit transformaci POST http://localhost:6272/RTransformation (Případně to udělat přes FE, ale ten jsem nezkoušel)
+#	{
+#	  "id":0,
+#	  "name": "test",
+#	  "script": "print('Start!');print(Sys.getenv(\"CONNECTION_STRING\"));"
+#	}
+
+
+# Spustit transformaci GET http://localhost:6272/RTransformation/run/{id} (Případně to udělat přes FE, ale ten jsem nezkoušel)
+
+# V logu u aas-r-engine by mělo být vidět jak to běželo. První běh se může tvářit jako failed, ale proběhne OK. Ten worker, když si stahuje image, tak hodí error, ale proběhne to. 
+# Všechny containery jsou v síti "aas" a komunikace běží mezi nima uvnitř sítě. 
+# Parametry u workeru jsem ti nastavil pro docker-host. (Můžeš si je případně upravit)
+# Je to prostě první verze a dost věcí ještě není pořešeno a jsou na tvrdo. 
+
+version: "3.8"
  
 services:
   dwh_db_prod:
     container_name: dwh_db_prod
-    image: ambicaaas/aas_dwh_storage_db
+    image: ambicaaas/aas_dwh_storage_db:latest
     restart: always
     ports:
       - 6232:5432
@@ -12,11 +38,13 @@ services:
     environment:
       - POSTGRES_PASSWORD=ambica_prod
       - POSTGRES_DB=dwh
+    networks:
+      - aas
     logging:
         driver: "fluentd"
   dwh_db_test:
     container_name: dwh_db_test
-    image: ambicaaas/aas_dwh_storage_db
+    image: ambicaaas/aas_dwh_storage_db:latest
     restart: always
     ports:
       - 6233:5432
@@ -25,11 +53,13 @@ services:
     environment:
       - POSTGRES_PASSWORD=ambica_test
       - POSTGRES_DB=dwh
+    networks:
+      - aas
     logging:
         driver: "fluentd"
   dwh_db_dev:
     container_name: dwh_db_dev
-    image: ambicaaas/aas_dwh_storage_db
+    image: ambicaaas/aas_dwh_storage_db:latest
     restart: always
     ports:
       - 6234:5432
@@ -38,68 +68,137 @@ services:
     environment:
       - POSTGRES_PASSWORD=ambica_dev
       - POSTGRES_DB=dwh
+    networks:
+      - aas
     logging:
         driver: "fluentd"
   identity_db:
     container_name: identity_db
-    image: ambicaaas/aas_dwh_storage_db
-    restart: always
+    image: ambicaaas/aas_identity_db:latest
     ports:
       - 6242:5432
     environment: 
       - POSTGRES_PASSWORD=ambica_sec
-      - POSTGRES_DB=security
+      - POSTGRES_DB=identity
     volumes:
       - identity_data:/var/lib/postgresql/data
+    networks:
+      - aas
     logging:
         driver: "fluentd"
   identity_api:
     depends_on:
       - identity_db
-    container_name: identity_api
-    image: ambicaaas/aas_identity_server_api
     restart: always
+    container_name: identity_api
+    image: ambicaaas/aas_identity_server_api:latest
     ports:
       - 6241:80
+    networks:
+      - aas
     logging:
         driver: "fluentd"
   datawarehouse_db:
     container_name: datawarehouse_db
-    image: ambicaaas/aas_dwh_storage_db
+    image: postgres:14.1-alpine
     restart: always
     ports:
       - 6271:5432
-    environment: 
+    environment:
       - POSTGRES_PASSWORD=ambica_dwh
-      - POSTGRES_DB=datawarehouse
     volumes:
       - datawarehouse_data:/var/lib/postgresql/data
+    networks:
+      - aas
     logging:
         driver: "fluentd"
+  rabbitmq:
+    image: rabbitmq:3.9-management
+    restart: always
+    container_name: aas_rabbitmq
+    ports:
+        - 5672:5672
+        - 15672:15672
+    networks:
+      - aas
+    logging:
+        driver: "fluentd"
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "-q", "status" ]
+      interval: 5s
+      timeout: 30s
+      retries: 10
   datawarehouse_api:
     depends_on:
-      - datawarehouse_db
+      rabbitmq:
+        condition: service_healthy
     container_name: datawarehouse_api
-    image: ambicaaas/aas_datawarehouse_api
-    restart: always
+    image: ambicaaas/aas_datawarehouse_api:latest
     ports:
       - 6272:80
+    environment: 
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=guest
+      - RABBITMQ_PASSWORD=guest
+      - RABBITMQ_HOST=aas_rabbitmq
+      - CONNECTION_STRING_DEFAULT=Server=datawarehouse_db;Port=5432;User Id=postgres;Password=ambica_dwh;Database=ambica_dwh;
+      - CONNECTION_STRING_FILE_STORAGE=Server=datawarehouse_db;Port=5432;User Id=postgres;Password=ambica_dwh;Database=ambica_file_storage;
+      - IDENTITY_SERVER_URL=http://identity_api
+    networks:
+      - aas
     logging:
         driver: "fluentd"
   main_fe:
     depends_on:
       - datawarehouse_api
     container_name: main_fe
-    image: ambicaaas/aas_main_fe
-    restart: always
+    image: ambicaaas/aas_main_fe:latest
     ports:
       - 6262:80
+    networks:
+      - aas
+    environment: 
+      - VUE_APP_DWH_API_URL=http://localhost:6272
+      - DWH_API_URL=http://localhost:6272
     logging:
         driver: "fluentd"
-
+  r_engine:
+    depends_on:
+      - datawarehouse_api
+    container_name: aas_r_engine
+    image: ambicaaas/aas_r_engine:latest
+    ports:
+      - 6290:80
+    environment: 
+      - CONNECTION_STRING_DEFAULT=Server=datawarehouse_db;Port=5432;User Id=postgres;Password=ambica_dwh;Database=ambica_dwh;
+      - CONNECTION_STRING_FILE_STORAGE=Server=datawarehouse_db;Port=5432;User Id=postgres;Password=ambica_dwh;Database=ambica_file_storage;
+      - IDENTITY_SERVER_URL=http://identity_api
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=guest
+      - RABBITMQ_PASSWORD=guest
+      - RABBITMQ_HOST=aas_rabbitmq
+      - DOCKER_NETWORKS=aas
+      - AAS_R_BASE_IMAGE_NAME=aas-r-base
+      - R_BASE_IMAGE_NAME=r-base
+      - PSQL_IMAGE_NAME=aas-psql
+    logging:
+        driver: "fluentd"
+# Tady /tmp/scripts nahraď cestou k nějaké tvojí reálné složce
+      - SCRIPT_FOLDER=/tmp/scripts
+    networks:
+      - aas
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+# Tady /tmp/scripts nahraď cestou k nějaké tvojí reálné složce
+      - /tmp/scripts:/scripts
+     
 volumes: 
   dwh_db_prod_data:
   dwh_db_test_data:
   dwh_db_dev_data:
   identity_data:
-  datawarehouse_data:
+  datawarehouse_data: 
+  
+networks:
+  aas:
+    name: aas
